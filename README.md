@@ -152,7 +152,7 @@ Next, add the *students* array to the _src/schema.js_ file, below the typeDefs v
 
 // node-graphql/src/schema.js
 
-const posts = [
+const students = [
   {
     id: 1,
     email: 'ada@telixia.com',
@@ -232,7 +232,7 @@ module.exports = {
 ```
 
 
-You define the resolvers following the same structure as the GraphQL schema. Every field in the schema’s types has a corresponding resolver function whose responsibility is to return the data for that field in your schema. For example, the Query.enrollment() resolver will return the published posts by filtering the posts array.
+You define the resolvers following the same structure as the GraphQL schema. Every field in the schema’s types has a corresponding resolver function whose responsibility is to return the data for that field in your schema. For example, the Query.enrollment() resolver will return the enrolled students by filtering the students array.
 
 Resolver functions receive four arguments:
 
@@ -442,6 +442,9 @@ In this step, you will create a GitHub repository for your project and push your
 Begin by initializing a repository from the prisma-graphql folder:
 
     $ git init
+
+To avoid committing the **_node_modules_** folder and the **_.env_** file, begin by creating a **_.gitignore_** file:
+
     $ touch .gitignore
  
  ```
@@ -492,7 +495,717 @@ After the repository was created, push the changes with the following commands, 
     $ git branch -M main
     $ git push --set-upstream origin main
     
-You have successfully committed and pushed the changes to GitHub. Next, you will connect the repository to App Platform and deploy the GraphQL API.
+You have successfully committed and pushed the changes to GitHub. 
+
+## Step 6 — Setting Up Prisma with PostgreSQL
+
+So far the GraphQL API you built used the in-memory students array in the **database.js** file to store data. This means that if your server restarts, all changes to the data will be lost. To ensure that your data is safely persisted, you will replace the **database.js** with a PostgreSQL database and use Prisma to access the data.
+
+In this step, you will install the Prisma CLI, create your initial Prisma schema, set up PostgreSQL locally with Docker, and connect Prisma to it.
+
+The Prisma schema is the main configuration file for your Prisma setup and contains your database schema.
+
+Begin by installing the Prisma CLI with the following command:
+
+    $ npm install prisma -D
+  
+The Prisma CLI will help with database workflows such as running database migrations and generating Prisma Client.
+
+Next, you’ll set up your PostgreSQL database using Docker. Create a new Docker Compose file with the following command:
+
+    $  touch docker-compose.yml
+ 
+Now add the following code to the newly created file:
+
+
+```yml
+
+# node-graphql/docker-compose.yml
+
+version: '3.8'
+services:
+  postgres:
+    image: postgres:13
+    restart: always
+    environment:
+      - POSTGRES_USER=db_user
+      - POSTGRES_PASSWORD=db_password
+    volumes:
+      - postgres:/var/lib/postgresql/data
+    ports:
+      - '5432:5432'
+volumes:
+  postgres:
+  ```
+
+This Docker Compose configuration file is responsible for starting the official PostgreSQL Docker image on your machine. The POSTGRES_USER and POSTGRES_PASSWORD environment variables set the credentials for the superuser (a user with admin privileges). You will also use these credentials to connect Prisma to the database. Finally, you define a volume where PostgreSQL will store its data, and bind the 5432 port on your machine to the same port in the Docker container.
+
+With this setup in place, go ahead and launch the PostgreSQL database server with the following command:
+
+    $ docker-compose up -d
+ 
+The Output:
+
+```
+Creating network "node-graphql_default" with the default driver
+Creating volume "node-graphql_postgres" with default driver
+Creating node-graphql_postgres_1 ... done
+```
+
+You can verify that the database server is running with the following command:
+
+    $ docker ps
+ 
+This will output something similar to:
+```
+CONTAINER ID   IMAGE         COMMAND                  CREATED          STATUS          PORTS                                       NAMES
+ca2813291692   postgres:13   "docker-entrypoint.s…"   40 seconds ago   Up 35 seconds   0.0.0.0:5432->5432/tcp, :::5432->5432/tcp   node-graphql_postgres_1
+```
+
+With the PostgreSQL container running, you can now create your Prisma setup. Run the following command from the Prisma CLI:
+
+    $ npx prisma init
+ 
+Note that as a best practice, all invocations of the Prisma CLI should be prefixed with npx. This ensures it’s using your local installation.
+
+After running the command, the Prisma CLI created a new folder called prisma in your project. It contains the following two files:
+
+- **_schema.prisma_**: The main configuration file for your Prisma project (in which you will include your data model).
+- **_.env_**: A dotenv file to define your database connection URL.
+
+To make sure Prisma knows about the location of your database, open the **prisma/.env** file:
+
+ 
+Adjust the DATABASE_URL environment variable to look as follows:
+
+```json
+# node-graphql/prisma/.env
+
+DATABASE_URL="postgresql://db_user:db_password@localhost:5432/college_db?schema=public"
+```
+
+Note that you’re using the database credentials test-user and test-password, which are specified in the Docker Compose file. To learn more about the format of the connection URL, visit the [Prisma docs](https://www.prisma.io/docs/reference/database-connectors/postgresql/#connection-url).
+
+You have successfully started PostgreSQL and configured Prisma using the Prisma schema. In the next step, you will define your data model for the blog and use Prisma Migrate to create the database schema.
+
+
+## Step 7 — Defining the Data Model with Prisma Migrate
+
+Now you will define your [data model](https://www.prisma.io/docs/reference/tools-and-interfaces/prisma-schema/data-model) in the Prisma schema file you’ve just created. This data model will then be mapped to the database with Prisma Migrate, which will generate and send the SQL statements for creating the tables that correspond to your data model.
+
+Since you’re building a college portal, the main entities of the application will be students, teachers and courses. In this step, you will define a Student model with a similar structure to the Student type in the GraphQL schema. In a later step, you will evolve the app and add a Teacher and Course models.
+
+Note: The GraphQL API can be seen as an abstraction layer for your database. When building a GraphQL API, it’s common for the GraphQL schema to closely resemble your database schema. However, as an abstraction, the two schemas won’t necessarily have the same structure, thereby allowing you to control which data you want to expose over the API. This is because some data might be considered sensitive or irrelevant for the API layer.
+
+Prisma uses its own [data modeling language](https://www.prisma.io/docs/reference/tools-and-interfaces/prisma-schema#syntax) to define the shape of your application data.
+
+Go to _node-graphql/prisma/schema.prisma_ Add the following model definitions to it:
+
+```js
+// node-graphql/prisma/schema.prisma
+
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+model Student {
+  id       Int     @id @default(autoincrement())
+  email    String
+  fullname String?
+  dept     String?
+  enrolled Boolean @default(false)
+}
+
+```
+
+
+You are defining a model called Student with a number of fields. The model will be mapped to a database table; the fields represent the individual columns.
+
+The id fields have the following field attributes:
+
+- **_@default(autoincrement())_** : This sets an auto-incrementing default value for the column.
+
+- **_@id_**: This sets the column as the primary key for the table.
+
+With the model in place, you can now create the corresponding table in the database using Prisma Migrate. This can be done with the **_migrate dev_** command that creates the migration files and runs them.
+
+Open up your terminal again and run the following command:
+
+    $ npx prisma migrate dev --name "init" --skip-generate
+ 
+This will output something similar to:
+
+```
+Environment variables loaded from .env
+Prisma schema loaded from prisma/schema.prisma
+Datasource "db": PostgreSQL database "college_db", schema "public" at "localhost:5432"
+
+PostgreSQL database college_db created at localhost:5432
+
+The following migration(s) have been created and applied from new schema changes:
+
+migrations/
+  └─ 20210815160400_init/
+    └─ migration.sql
+
+Your database is now in sync with your schema.
+```
+
+This command creates a new migration on your file system and runs it against the database to create the database schema. Here’s a quick overview of the options that are provided to the command:
+
+- **_--name "init"_**: Specifies the name of the migration (will be used to name the migration folder that’s created on your file system).
+
+- **_--skip-generate_**: Skips generating Prisma Client (this will be done in the next step).
+
+Your **prisma/migrations** directory is now populated with the SQL migration file. This approach allows you to track changes to the database schema and create the same database schema in production.
+
+Note: If you’ve already used Prisma Migrate with the _college_db_ database and there is an inconsistency between the migrations in the prisma/migration folder and the database schema you will be prompted to reset the database with the following output:
+
+```
+Output
+? We need to reset the PostgreSQL database "college_db" at "localhost:5432". All data will be lost.
+Do you want to continue? › (y/N)
+You can resolve this by entering y which will reset the database. Beware that this will cause all data in the database to be lost.
+```
+
+You’ve now created your database schema. In the next step, you will install Prisma Client and use it in your GraphQL resolvers.
+
+## Step 8 — Using Prisma Client in the GraphQL Resolvers
+
+Prisma Client is an auto-generated and type-safe Object Relational Mapper (ORM) that you can use to programmatically read and write data in a database from a Node.js application. In this step, you’ll install Prisma Client in your project.
+
+Open up your terminal again and install the Prisma Client npm package:
+
+    $  npm install @prisma/client
+ 
+Note: Prisma Client gives you rich auto-completion by generating code based on your Prisma schema to the _node_modules_ folder. To generate the code you use the *_npx prisma generate_* command. This is typically done after you create and run a new migration. On the first install, however, this is not necessary as it will automatically be generated for you in a *_postinstall_* hook.
+
+With the database and GraphQL schema created, and Prisma Client installed, you will now use Prisma Client in the GraphQL resolvers to read and write data in the database. You’ll do this by replacing the *_database.js_* file with *_db.js_*, which you’ve used so far to hold your data.
+
+    $ touch src/db.js
+
+Begin by creating the following file:
+
+```js
+// node-graphql/src/db.js
+const { PrismaClient } = require('@prisma/client')
+
+module.exports = {
+  prisma: new PrismaClient(),
+}
+```
+
+Next, you will import the prisma instance into *_src/schema.js_*. To do so, open *_src/schema.js_*  and then import prisma from ./db at the top of the file:
+
+    // node-graphql/src/schema.js
+
+    const { prisma } = require('./db')
+
+Now you will update the Query resolvers to fetch enrolled students from the database. Update the resolvers.Query object with the following resolvers:
+
+```js
+// node-graphql/src/schema.js
+
+
+const resolvers = {
+  Query: {
+    enrollment: (parent, args) => {
+      return prisma.student.findMany({
+        where: { enrolled: true },
+      });
+    },
+    student: (parent, args) => {
+      return prisma.student.findOne({
+        where: { id: Number(args.id) },
+      });
+    },
+  },
+```
+
+Here, you’re using two Prisma Client queries:
+
+- *_findMany_*: Fetches students whose enrolled field is false.
+
+- *_findOne_*: Fetches a single student whose id field equals the id GraphQL argument.
+
+Note, that as per the [GraphQL specification](http://spec.graphql.org/June2018/#sec-ID), the ID type is serialized the same way as a *_String_*. Therefore you convert to a *_Number_* because the id in the Prisma schema is an *_int_*.
+
+Next, you will update the *_Mutation_* resolver to save and update students in the database. Update the *_resolvers.Mutation_* Object with the following resolvers:
+
+
+```js
+
+// node-graphql/src/schema.js
+
+
+
+const resolvers = {
+  ...
+  Mutation: {
+    registerStudent: (parent, args) => {
+      return prisma.student.create({
+        data: {
+          email: args.email,
+          fullname: args.fullname,
+          dept: args.dept,
+        },
+      });
+
+    },
+    enroll: (parent, args) => {
+      return prisma.student.update({
+        where: {
+          id: Number(args.id),
+        },
+        data: {
+          enrolled: true,
+        },
+      });
+    },
+  },
+}
+```
+
+You’re using two Prisma Client queries:
+
+- *_create_*: Create a Student record.
+
+- *_update_*: Update the enrolled field of the Student record whose id matches the one in the query argument.
+
+Now that you’ve updated the resolvers to use Prisma Client, start the server to test the flow of data between the GraphQL API and the database with the following command:
+
+
+    $ npm start 
+
+Open the GraphQL playground at the address from the output and test the GraphQL API using the same queries from Step 3.
+
+Then run the following two commands to commit the changes:
+
+    $  git add .
+    $  git commit -m 'Feature: Add Prisma'
+    $  git push
+
+Run the migrations against the database with Prisma Migrate.
+
+    $ npx prisma migrate dev
+
+## Step 10 — Adding the User Model
+
+Your GraphQL API for College has a single entity named *_Student_*. In this step, you’ll evolve the API by defining a new model in the Prisma schema and adapting the GraphQL schema to make use of the new model. You will introduce a *_Teacher_*, a *_Course_* and a *_Department_* model. Also, there exist a one-to-many relation from *_Department_* to the *_Student_* model as well as betwwen a *_Teacher_*, to a *_Course_*. This will allow you to represent the Teacher of Course and associate multiple Courses to each Teacher for instance. Then you will evolve the GraphQL schema to allow creating Teacher and associating Course with teachers through the API.
+
+First, open the Prisma schema and add the following:
+
+```js
+// node-graphql/prisma/schema.prisma
+
+// model Student {
+//   id       Int     @id @default(autoincrement())
+//   email    String
+//   fullname String?
+//   dept     String?
+//   enrolled Boolean @default(false)
+// }
+
+model Student {
+  id       Int         @id @default(autoincrement())
+  email    String      @unique
+  fullname String?
+  enrolled Boolean     @default(false)
+  dept     Department? @relation(fields: [deptId], references: [id])
+  deptId   Int?
+}
+
+model Department {
+  id          Int       @id @default(autoincrement())
+  name        String    @unique
+  description String
+  students    Student[]
+}
+
+model Teacher {
+  id       Int      @id @default(autoincrement())
+  email    String   @unique
+  fullname String?
+  courses  Course[]
+}
+
+model Course {
+  id          Int      @id @default(autoincrement())
+  code        String   @unique
+  name        String
+  description String?
+  teacher     Teacher? @relation(fields: [teacherId], references: [id])
+  teacherId   Int?
+}
+
+```
+
+You’ve added the following to the Prisma schema:
+
+- The *Department* model to represent course Specialties.
+- The *Teacher* model to represent course Instructors/Facilitators.
+- The *Course* model to represent subject matters
+
+The Student model has been modifies as follows:
+
+- Two relation fields: dept and deptId. Relation fields define connections between models at the Prisma level and do not exist in the database. These fields are used to generate the Prisma Client and to access relations with Prisma Client.
+
+- The deptId field, which is referenced by the @relation attribute. Prisma will create a foreign key in the database to connect Student and Department.
+
+Note that the *dept* field in the Student model is optional, similarly to the teacher field in Course model. That means you’ll be able to create students unassociated with a department as well as a course without and associated Teacher.
+
+The relationship makes sense because course are usually later on assigned to Teachers and also Registered students are usually matrucilated later on into a Department.
+
+Next, create and apply the migration locally with the following command:
+
+    $  npx prisma migrate dev --name "more-features"
+
+If the migration succeeds you will receive the following:
+
+```
+Environment variables loaded from .env
+Prisma schema loaded from prisma/schema.prisma
+Datasource "db": PostgreSQL database "college_db", schema "public" at "localhost:5432"
+
+
+⚠️  Warnings for the current datasource:
+
+  • A unique constraint covering the columns `[email]` on the table `Student` will be added. If there are existing duplicate values, this will fail.
+
+✔ Are you sure you want create and apply this migration? … yes
+The following migration(s) have been created and applied from new schema changes:
+
+migrations/
+  └─ 20210815184145_more_features/
+    └─ migration.sql
+
+Your database is now in sync with your schema.
+
+Running generate... (Use --skip-generate to skip the generators)
+
+> prisma@2.29.1 preinstall /home/peace/Projects/Lesson/node-graphql/node_modules/prisma
+> node scripts/preinstall-entry.js
+
+```
+
+The command also generates Prisma Client so that you can make use of the new table and fields.
+
+You will now update the GraphQL schema and resolvers to make use of the updated database schema.
+
+Open the src/schema.js file and add update typeDefs as follows:
+
+
+```js
+
+// node-graphql/src/schema.js
+
+const { gql } = require('apollo-server')
+
+const typeDefs = gql`
+
+  type Student {
+    id: ID!
+    email: String!
+    fullName: String!
+    dept: Department
+    enrolled: Boolean
+  }
+
+  type Department {
+    id: ID!
+    name: String!
+    description: String!
+    students: [Student!]!
+  }
+
+  type Teacher {
+    id: ID!
+    email: String!
+    fullname: String!
+    courses: [Course]
+  }
+
+  type Course {
+    id: ID!
+    code: String!
+    name: String!
+    description: String!
+    teacher: Teacher
+  }
+
+  input TeacherCreateInput {
+    email: String!
+    fullname: String
+    courses: [CourseCreateWithoutTeacherInput!]
+  }
+
+  input CourseCreateWithoutTeacherInput {
+    code: String!
+    name: String!
+    description: String
+  }
+
+  type Query {
+    enrollment: [Student!]!
+    students: [Student!]!
+    student(id: ID!): Student
+    departments: [Department!]!
+    department(id: ID!): Department
+    courses: [Course!]!
+    course(id: ID!): Course
+    teachers: [Teacher!]!
+    teacher(id: ID!): Teacher
+  }
+
+  type Mutation {
+    registerStudent(email: String!, fullName: String!): Student!
+    enroll(id: ID!): Student
+    createTeacher(data: TeacherCreateInput!): Teacher!
+    createCourse(teacherEmail: String!, code: String!, name: String!): Course!
+    createDepartment(name: String!, description: String!): Department!
+  }
+`
+
+```
+
+ In this updated code, you’re adding the following changes to the GraphQL schema:
+
+- The *Teacher* type, which returns an array of *Course*.
+- The *Department* type, which returns an array of *Student*.
+- The *Course* type which has a *Teacher* type
+- The dept of type *Department* field to the *Student* type.
+- The createTeacher mutation, which expects the TeacherCreateInput as its input type.
+
+- The CourseCreateWithoutTeacherInput input type used in the TeacherCreateInput input for creating teachers as part of the createTeacher mutation.
+
+- The teacherEmail optional argument to the createCourse mutation.
+
+With the schema updated, you will now update the resolvers to match the schema.
+
+Update the resolvers object as follows:
+
+
+```js
+// node-graphql/src/schema.js
+
+const resolvers = {
+    Query: {
+      enrollment: (parent, args) => {
+        return prisma.student.findMany({
+          where: { enrolled: true },
+        });
+      },
+
+      student: (parent, args) => {
+        return prisma.student.findOne({
+          where: { id: Number(args.id) },
+        });
+      },
+
+      students: (parent, args) => {
+        return prisma.student.findMany({});
+      },
+
+      departments: (parent, args) => {
+        return prisma.department.findMany({});
+      },
+
+      department: (parent, args) => {
+        return prisma.department.findOne({
+          where: { id: Number(args.id) },
+        });
+      },
+
+      courses: (parent, args) => {
+        return prisma.course.findMany({});
+      },
+
+      course: (parent, args) => {
+        return prisma.course.findOne({
+          where: { id: Number(args.id) },
+        });
+      },
+
+      teachers: (parent, args) => {
+        return prisma.teacher.findMany({});
+      },
+
+      teacher: (parent, args) => {
+        return prisma.teacher.findOne({
+          where: { id: Number(args.id) },
+        });
+      },
+      
+    },
+  
+    Mutation: {
+
+      registerStudent: (parent, args) => {
+        return prisma.student.create({
+          data: {
+            email: args.email,
+            fullname: args.fullname,
+            dept: args.dept,
+          },
+        });
+      },
+
+      enroll: (parent, args) => {
+        return prisma.student.update({
+          where: {
+            id: Number(args.id),
+          },
+          data: {
+            enrolled: true,
+          },
+        });
+      },
+
+    createTeacher: (parent, args) => {
+        return prisma.teacher.create({
+          data: {
+            email: args.email,
+            fullname: args.fullname,
+            courses: {
+            create: args.data.courses,
+          },
+          },
+        });
+      },
+
+    createCourse: (parent, args) => {
+        return prisma.course.create({
+          data: {
+            code: args.code,
+            name: args.name,
+            teacher: args.teacherEmail && {
+            connect: { email: args.teacherEmail },
+          },
+          },
+        });
+      },
+
+    createDepartment: (parent, args) => {
+        return prisma.student.create({
+          data: {
+            name: args.name,
+            description: args.description,
+          },
+        });
+      },
+
+    },
+  
+    Student: {
+      id: (parent) => parent.id,
+      email: (parent) => parent.email,
+      fullname: (parent) => parent.fullname,
+      enrolled: (parent) => parent.enrolled,
+      dept: (parent, args) => {
+        return prisma.department.findOne({
+            where: { id: parent.id },
+          })
+      },
+    },
+
+    Teacher: {
+      courses: (parent, args) => {
+        return prisma.teacher.findOne({
+            where: { id: parent.id },
+          })
+          .courses()
+      },
+    },
+
+    Course: {
+      teacher: (parent, args) => {
+        return prisma.course.findOne({
+            where: { id: parent.id },
+          })
+          .teacher()
+      },
+    },
+
+    Department: {
+      students: (parent, args) => {
+        return prisma.department.findOne({
+            where: { id: parent.id },
+          })
+          .students()
+      },
+    },
+
+  }
+  
+
+```
+
+Let’s break down the changes to the resolvers:
+
+- The createCourse mutation resolver now uses the teacherEmail argument (if passed) to create a relation between the created course and an existing teacher.
+
+- The new createTeacher mutation resolver creates a teacher and related courses using nested writes.
+
+- The Teacher.courses and Post.teacher resolvers define how to resolve the courses and teacher fields when the Teacher or Post are queried. These use Prisma’s Fluent API to fetch the relations.
+
+Start the server to test the GraphQL API:
+
+    $  npm start
+ 
+Begin by testing the createTeacher resolver with the following GraphQL mutation:
+
+```gql
+mutation {
+  createTeacher(data: { email: "yohanne@telixia.com", fullname: "Yohanne" }) {
+    email
+    id
+  }
+}
+```
+ 
+This will create a teacher.
+
+Next, test the createCourse resolver with the following mutation:
+
+```gql
+
+mutation {
+  createCourse(
+    teacherEmail: "yohanne@telixia.com"
+    code: "DAML"
+    name: "Data Analytics and Machine Learning"
+    description: "Data Analytics and Machine Learning with PowerBi, Tableau, and AutoML"
+  ) {
+    id
+    code
+    name
+    description
+    teacher {
+      id
+      fullname
+    }
+  }
+}
+```
+ 
+Notice that you can fetch the teacher whenever the return value of a query is Course. In this example, the Course.teacher resolver will be called.
+
+Finally, commit your changes and push to deploy the API:
+
+    $  git add .
+    $  git commit -m "Feature: Add Teacher, Couse, Department"
+    $  git push
+ 
+You have successfully evolved your database schema with Prisma Migrate and exposed the new model in your GraphQL API.
+
 
 ## Conclusion
 
